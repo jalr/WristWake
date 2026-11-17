@@ -16,6 +16,9 @@ For the darkness color scheme by sunrise and sunset, WristWake uses the approxim
 
 I designed the concept, the features and the look of this watchapp myself, down to the menu items, ringtones and vibration patterns. For the coding, I used Claude Code.
 
+The smart alarm's sleep-phase detection is adapted from Tuomas Airaksinen's
+([tuomas2](https://github.com/tuomas2)) [PebbleSykeroAlarm](https://github.com/Sykero-Software/PebbleSykeroAlarm) — thank you!
+
 With this alarm app, I wanted to:
 - keep it clean, intuitive and easy to use
 - set alarms in bed without grabbing my phone
@@ -25,6 +28,7 @@ With this alarm app, I wanted to:
 
 Features:
 - up to 8 alarms with name, weekdays and snooze
+- smart alarm: rings a few minutes early on detected light sleep, never later than the set time
 - protection against accidental deletion
 - 18 ringtones (5 rising), 4 volume levels
 - vibration patterns, with or without sound

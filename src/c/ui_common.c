@@ -135,6 +135,26 @@ const char *ui_snooze_name(uint8_t minutes) {
   }
 }
 
+const char *ui_smart_window_name(uint8_t minutes) {
+  switch (minutes) {
+    case 0:  return TR("Off", "Aus");
+    case 10: return "10 min";
+    case 15: return "15 min";
+    case 20: return "20 min";
+    case 45: return "45 min";
+    case 60: return TR("1 hour", "1 Std.");
+    default: return "30 min";
+  }
+}
+
+const char *ui_sensitivity_name(SmartSensitivity sensitivity) {
+  switch (sensitivity) {
+    case SMART_SENS_LOW:  return TR("Low", "Niedrig");
+    case SMART_SENS_HIGH: return TR("High", "Hoch");
+    default:              return TR("Medium", "Mittel");
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------

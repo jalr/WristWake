@@ -26,7 +26,8 @@
     "configPage": "src/config/index.html",
     "capabilities": [
       "configurable",
-      "location"
+      "location",
+      "health"
     ],
     "messageKeys": [
       "STATE",

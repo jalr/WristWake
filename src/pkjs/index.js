@@ -171,7 +171,7 @@ function alarmAttributes(a) {
     days: dayList(a.d), enabled: !!a.e, sound: a.so, vibrate: !!a.vi, pattern: a.p, snooze: a.z,
     'protected': !!a.pr, volume: a.vo || 'medium', challenge: a.ch || 'off',
     challenge_length: a.ch === 'remember' ? (a.rl || 4) : (a.cl || 4), challenge_pause: (a.cp || 1000) / 1000,
-    symbol: a.sy || 'none'
+    symbol: a.sy || 'none', smart_window: a.sw || 0, smart_sensitivity: a.se || 'medium'
   };
 }
 

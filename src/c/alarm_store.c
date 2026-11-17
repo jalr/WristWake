@@ -1,12 +1,14 @@
 #include "alarm_store.h"
 #include "symbols.h"
 
-// Persistent storage keys (theme: 10-12, see theme.c; status: 5, see comms.c)
-#define STORE_SCHEMA_VERSION 12
+// Persistent storage keys (theme: 10-12, see theme.c; status: 5, see comms.c;
+// smart alarm window state: 7, see smart_alarm.c)
+#define STORE_SCHEMA_VERSION 13
 #define KEY_SCHEMA      1
 #define KEY_WATCH_ID    2
 #define KEY_WATCH_NAME  3
 #define KEY_SNOOZE      4   // int32_t[8]: snooze end per slot
+#define KEY_SERVED      6   // int32_t[8]: served-occurrence per slot, see store_served_at
 #define KEY_OLD_VIBE_MS 20  // 20-22: S/L/P lengths from schema 2-3, no longer used
 #define KEY_SLOT_BASE 100   // 101-108 = slots 1-8
 
@@ -14,6 +16,7 @@
 
 const uint8_t SNOOZE_OPTIONS[SNOOZE_OPTION_COUNT] = {0, 5, 10, 15, 30, 60};
 const uint16_t CHALLENGE_PAUSES_MS[CHALLENGE_PAUSE_COUNT] = {500, 1000, 2000, 3000, 4000};
+const uint8_t SMART_WINDOW_OPTIONS[SMART_WINDOW_OPTION_COUNT] = {0, 10, 15, 20, 30, 45, 60};
 
 static const char *const SOUND_KEYS[ALARM_SOUND_COUNT] = {
   "off", "reveille", "beep", "chime", "rising_beep", "korobeiniki", "westminster", "field_agent",
@@ -23,6 +26,7 @@ static const char *const SOUND_KEYS[ALARM_SOUND_COUNT] = {
 
 static const char *const VOLUME_KEYS[ALARM_VOLUME_COUNT] = {"quiet", "low", "medium", "high"};
 static const char *const CHALLENGE_KEYS[CHALLENGE_COUNT] = {"off", "follow", "remember"};
+static const char *const SENS_KEYS[SMART_SENS_COUNT] = {"low", "medium", "high"};
 
 static const char *const VIBE_KEYS[VIBE_PATTERN_COUNT] = {
   "standard", "pulse", "double", "heartbeat", "rising", "sos", "long", "gentle", "aurora"
@@ -30,6 +34,7 @@ static const char *const VIBE_KEYS[VIBE_PATTERN_COUNT] = {
 
 static Alarm s_alarms[ALARM_SLOTS];
 static int32_t s_snooze[ALARM_SLOTS];
+static int32_t s_served[ALARM_SLOTS];
 static char s_watch_id[WATCH_ID_LEN + 1];
 static char s_watch_name[WATCH_NAME_BUF];
 static StoreChangeHandler s_change_handler;
@@ -131,6 +136,12 @@ static void prv_sanitize(Alarm *alarm) {
     alarm->last_sound = DEFAULT_LAST_SOUND;
   }
   if (alarm->symbol >= SYMBOL_COUNT) alarm->symbol = SYMBOL_NONE;
+  if (!alarm_smart_window_valid(alarm->smart_window_min)) {
+    alarm->smart_window_min = DEFAULT_SMART_WINDOW_MIN;
+  }
+  if (alarm->smart_sensitivity >= SMART_SENS_COUNT) {
+    alarm->smart_sensitivity = DEFAULT_SMART_SENSITIVITY;
+  }
 }
 
 static void prv_generate_watch_id(void) {
@@ -206,6 +217,11 @@ static void prv_migrate_old(int32_t schema) {
       memcpy(&alarm, raw, offsetof(Alarm, symbol));          // schema 11: no symbol yet
     }
     alarm.symbol = SYMBOL_NONE;
+    if (schema == 12 && read >= (int)offsetof(Alarm, smart_window_min)) {
+      memcpy(&alarm, raw, offsetof(Alarm, smart_window_min));  // schema 12: no smart alarm yet
+    }
+    alarm.smart_window_min = DEFAULT_SMART_WINDOW_MIN;
+    alarm.smart_sensitivity = DEFAULT_SMART_SENSITIVITY;
     persist_write_data(key, &alarm, sizeof(alarm));
   }
   for (int k = 0; k < 3; k++) persist_delete(KEY_OLD_VIBE_MS + k);
@@ -230,6 +246,10 @@ void store_init(void) {
   // Snooze state
   memset(s_snooze, 0, sizeof(s_snooze));
   persist_read_data(KEY_SNOOZE, s_snooze, sizeof(s_snooze));
+
+  // Served-occurrence state (smart alarm double-ring guard)
+  memset(s_served, 0, sizeof(s_served));
+  persist_read_data(KEY_SERVED, s_served, sizeof(s_served));
 
   // Watch identity
   if (persist_read_string(KEY_WATCH_ID, s_watch_id, sizeof(s_watch_id)) != WATCH_ID_LEN + 1) {
@@ -288,6 +308,8 @@ void store_alarm_defaults(Alarm *alarm) {
   alarm->challenge_pause = DEFAULT_CHALLENGE_PAUSE;
   alarm->remember_len = DEFAULT_REMEMBER_LEN;
   alarm->last_sound = DEFAULT_LAST_SOUND;
+  alarm->smart_window_min = DEFAULT_SMART_WINDOW_MIN;
+  alarm->smart_sensitivity = DEFAULT_SMART_SENSITIVITY;
 }
 
 bool store_save(int slot, const Alarm *alarm) {
@@ -318,6 +340,7 @@ bool store_delete(int slot) {
   }
   s_alarms[slot - 1] = empty;
   store_set_snooze_until(slot, 0);
+  store_set_served_at(slot, 0);
   prv_notify_change();
   return true;
 }
@@ -330,6 +353,16 @@ void store_set_snooze_until(int slot, time_t when) {
   if (!prv_slot_valid(slot) || s_snooze[slot - 1] == (int32_t)when) return;
   s_snooze[slot - 1] = (int32_t)when;
   persist_write_data(KEY_SNOOZE, s_snooze, sizeof(s_snooze));
+}
+
+time_t store_served_at(int slot) {
+  return prv_slot_valid(slot) ? (time_t)s_served[slot - 1] : 0;
+}
+
+void store_set_served_at(int slot, time_t when) {
+  if (!prv_slot_valid(slot) || s_served[slot - 1] == (int32_t)when) return;
+  s_served[slot - 1] = (int32_t)when;
+  persist_write_data(KEY_SERVED, s_served, sizeof(s_served));
 }
 
 const char *store_watch_id(void) {
@@ -363,9 +396,20 @@ const char *alarm_vibe_key(VibePattern_t pattern) {
   return pattern < VIBE_PATTERN_COUNT ? VIBE_KEYS[pattern] : VIBE_KEYS[DEFAULT_VIBE_PATTERN];
 }
 
+const char *alarm_sens_key(SmartSensitivity sensitivity) {
+  return (sensitivity < SMART_SENS_COUNT) ? SENS_KEYS[sensitivity] : SENS_KEYS[DEFAULT_SMART_SENSITIVITY];
+}
+
 bool alarm_snooze_valid(uint8_t minutes) {
   for (int i = 0; i < SNOOZE_OPTION_COUNT; i++) {
     if (SNOOZE_OPTIONS[i] == minutes) return true;
+  }
+  return false;
+}
+
+bool alarm_smart_window_valid(uint8_t minutes) {
+  for (int i = 0; i < SMART_WINDOW_OPTION_COUNT; i++) {
+    if (SMART_WINDOW_OPTIONS[i] == minutes) return true;
   }
   return false;
 }

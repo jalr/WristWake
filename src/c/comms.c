@@ -123,9 +123,11 @@ static void prv_build_state(void) {
     APPEND(",\"h\":%d,\"m\":%d,\"d\":%d,\"e\":%d,\"so\":\"%s\",\"vi\":%d,\"p\":\"%s\"",
            a->hour, a->minute, a->days, a->enabled, alarm_sound_key(a->sound), a->vibrate,
            alarm_vibe_key(a->vibe_pattern));
-    APPEND(",\"z\":%d,\"pr\":%d,\"vo\":\"%s\",\"ch\":\"%s\",\"cl\":%d,\"cp\":%d,\"rl\":%d,\"sy\":\"%s\",\"r\":%lu,\"nx\":%ld}", a->snooze,
+    APPEND(",\"z\":%d,\"pr\":%d,\"vo\":\"%s\",\"ch\":\"%s\",\"cl\":%d,\"cp\":%d,\"rl\":%d,\"sy\":\"%s\""
+           ",\"sw\":%d,\"se\":\"%s\",\"r\":%lu,\"nx\":%ld}", a->snooze,
            a->protect, alarm_volume_key(a->volume), alarm_challenge_key(a->challenge),
            a->challenge_len, CHALLENGE_PAUSES_MS[a->challenge_pause], a->remember_len, symbol_key(a->symbol),
+           a->smart_window_min, alarm_sens_key(a->smart_sensitivity),
            (unsigned long)a->rev, (long)scheduler_next_time(slot));
   }
   APPEND("]}");

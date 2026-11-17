@@ -1,8 +1,12 @@
 #include "scheduler.h"
 #include "alarm_store.h"
+#include "smart_alarm.h"
 
 // Wakeups cannot be scheduled within 30 s from now
 #define MIN_LEAD_SECONDS 31
+// How far ahead the smart-window re-entry wakeup is placed. Must be > 60 s:
+// PebbleOS refuses a wakeup within one minute of an already-scheduled one.
+#define SC_REENTRY_GAP_S (3 * 60)
 
 static uint8_t s_failed_mask;
 static time_t s_next[ALARM_SLOTS];
@@ -32,6 +36,9 @@ time_t scheduler_next_occurrence(int slot, time_t now) {
       if (!(a->days & (1 << bit))) continue;
     }
     time_t t = prv_at(norm, a->hour, a->minute);
+    // Already rung early via a smart wake: do not arm this exact occurrence again,
+    // or the hard deadline it was armed for would ring it a second time.
+    if (t == store_served_at(slot)) continue;
     if (t >= now + MIN_LEAD_SECONDS) return t;
   }
   return 0;
@@ -57,8 +64,10 @@ void scheduler_update(void) {
   memset(s_next, 0, sizeof(s_next));
   time_t now = time(NULL);
 
-  // Time per slot: the snooze time has priority over the regular one
+  // Time per slot: the snooze time has priority over the regular one. A snoozed
+  // alarm never gets a smart window of its own -- it already rang once tonight.
   time_t when[ALARM_SLOTS] = {0};
+  time_t window_when[ALARM_SLOTS] = {0};
   for (int slot = 1; slot <= ALARM_SLOTS; slot++) {
     const Alarm *a = store_get(slot);
     time_t snooze = store_snooze_until(slot);
@@ -70,11 +79,18 @@ void scheduler_update(void) {
     if (snooze && a->used) {
       when[slot - 1] = snooze;
     } else {
-      when[slot - 1] = scheduler_next_occurrence(slot, now);
+      time_t occ = scheduler_next_occurrence(slot, now);
+      when[slot - 1] = occ;
+      if (occ && smart_wanted(a)) {
+        time_t ws = smart_window_start(a, occ);
+        // Also filters out the slot currently being monitored: its window already
+        // started, so its own window_start lies at or before now.
+        if (ws > now + MIN_LEAD_SECONDS) window_when[slot - 1] = ws;
+      }
     }
   }
 
-  // Merge identical times into one wakeup
+  // Merge identical deadline times into one wakeup
   uint8_t done = 0;
   for (int i = 0; i < ALARM_SLOTS; i++) {
     if (!when[i] || (done & (1 << i))) continue;
@@ -95,6 +111,35 @@ void scheduler_update(void) {
     }
     APP_LOG(APP_LOG_LEVEL_INFO, "Wakeup %ld for slots 0x%02x in %ld s", (long)id, mask,
             (long)(when[i] - now));
+  }
+
+  // Merge identical smart-window-start times into one flagged wakeup. Losing one of
+  // these costs nothing but the smart behaviour for that occurrence: the deadline
+  // wakeup above is scheduled regardless and still rings on time.
+  uint8_t wdone = 0;
+  for (int i = 0; i < ALARM_SLOTS; i++) {
+    if (!window_when[i] || (wdone & (1 << i))) continue;
+    uint8_t mask = 0;
+    for (int j = i; j < ALARM_SLOTS; j++) {
+      if (window_when[j] == window_when[i]) mask |= (1 << j);
+    }
+    wdone |= mask;
+    WakeupId id = wakeup_schedule(window_when[i], SCHED_WINDOW_FLAG | mask, true);
+    if (id < 0) {
+      APP_LOG(APP_LOG_LEVEL_WARNING, "Smart window for slots 0x%02x at %ld rejected (%ld)",
+              mask, (long)window_when[i], (long)id);
+      continue;
+    }
+    APP_LOG(APP_LOG_LEVEL_INFO, "Smart window %ld for slots 0x%02x in %ld s", (long)id, mask,
+            (long)(window_when[i] - now));
+  }
+
+  // While a smart window is actively being monitored, keep a short re-entry wakeup
+  // armed so the app is revived if something kills it mid-window. wakeup_cancel_all()
+  // above just dropped it, so it must be re-armed every time this function runs, not
+  // only when the window first opens.
+  if (smart_is_open()) {
+    wakeup_schedule(now + SC_REENTRY_GAP_S, SCHED_REENTRY_COOKIE, false);
   }
 }
 

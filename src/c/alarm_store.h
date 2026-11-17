@@ -88,12 +88,28 @@ typedef enum {
 #define SNOOZE_OPTION_COUNT 6   // 0 = snooze off
 extern const uint8_t SNOOZE_OPTIONS[SNOOZE_OPTION_COUNT];
 
+// Smart alarm: rings a few minutes early on detected light sleep inside this window
+// before the set time; 0 = off (rings exactly at the set time, as before).
+#define SMART_WINDOW_OPTION_COUNT 7   // 0 = off
+extern const uint8_t SMART_WINDOW_OPTIONS[SMART_WINDOW_OPTION_COUNT];
+
+// How easily the smart alarm fires on movement (sleep_eval.h's percentile/required
+// minutes, resolved in smart_alarm.c so alarm_store stays free of that module).
+typedef enum {
+  SMART_SENS_LOW = 0,
+  SMART_SENS_MEDIUM,
+  SMART_SENS_HIGH,
+  SMART_SENS_COUNT
+} SmartSensitivity;
+
 #define DEFAULT_SOUND ALARM_SOUND_OFF
 #define DEFAULT_VIBRATE true
 #define DEFAULT_VIBE_PATTERN VIBE_STANDARD
 #define DEFAULT_SNOOZE 5
 #define DEFAULT_VOLUME ALARM_VOLUME_MEDIUM
 #define DEFAULT_LAST_SOUND ALARM_SOUND_REVEILLE   // comes back when a volume is chosen for "Off"
+#define DEFAULT_SMART_WINDOW_MIN 0   // off
+#define DEFAULT_SMART_SENSITIVITY SMART_SENS_MEDIUM
 
 // One alarm slot. Changing this layout requires a new STORE_SCHEMA_VERSION in
 // alarm_store.c and a migration of the old data.
@@ -118,6 +134,8 @@ typedef struct {
   uint8_t remember_len;        // Remember: number of boxes, since schema 10
   uint8_t last_sound;          // last sound other than Off (for volume "Off" -> level), since schema 11
   uint8_t symbol;              // symbols.h, 0 = none, since schema 12
+  uint8_t smart_window_min;    // SMART_WINDOW_OPTIONS, 0 = off, since schema 13
+  uint8_t smart_sensitivity;   // SmartSensitivity, since schema 13
 } Alarm;
 
 // Called after every saved alarm change (e.g. to reschedule).
@@ -155,6 +173,14 @@ bool store_delete(int slot);
 time_t store_snooze_until(int slot);
 void store_set_snooze_until(int slot, time_t when);
 
+// The occurrence (UTC) this alarm has already rung via an early smart wake, 0 = none.
+// The scheduler skips a freshly computed occurrence equal to this, so the hard
+// deadline that was armed for it cannot ring the same occurrence a second time.
+// Naturally becomes irrelevant once that instant is in the past (the next computed
+// occurrence is a different timestamp), so nothing actively expires it.
+time_t store_served_at(int slot);
+void store_set_served_at(int slot, time_t when);
+
 const char *store_watch_id(void);
 const char *store_watch_name(void);
 bool store_set_watch_name(const char *name);
@@ -164,4 +190,6 @@ const char *alarm_sound_key(AlarmSound sound);
 const char *alarm_vibe_key(VibePattern_t pattern);
 const char *alarm_volume_key(AlarmVolume volume);
 const char *alarm_challenge_key(AlarmChallenge challenge);
+const char *alarm_sens_key(SmartSensitivity sensitivity);
 bool alarm_snooze_valid(uint8_t minutes);
+bool alarm_smart_window_valid(uint8_t minutes);

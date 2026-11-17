@@ -26,6 +26,8 @@ enum {
   ROW_VOLUME,
   ROW_VIBRATION,
   ROW_SNOOZE,
+  ROW_SMART_WINDOW,      // sleep-phase detection: rings early within this window, never late
+  ROW_SMART_SENSITIVITY, // how easily the smart alarm fires on movement
   ROW_CHALLENGE, // solve a button pattern before the alarm can be stopped
   ROW_PROTECT,   // protection against accidental deletion
   ROW_COUNT
@@ -44,6 +46,8 @@ static char s_subtitle[48];
 static const char *s_sound_labels[ALARM_SOUND_COUNT];
 static AlarmSound s_sound_order[ALARM_SOUND_COUNT];   // display order: "Off" first, then A-Z
 static const char *s_snooze_labels[SNOOZE_OPTION_COUNT];
+static const char *s_smart_window_labels[SMART_WINDOW_OPTION_COUNT];
+static const char *s_sens_labels[SMART_SENS_COUNT];
 
 // Case-insensitive comparison (sound names are plain ASCII)
 static int prv_name_cmp(const char *a, const char *b) {
@@ -143,6 +147,18 @@ static void prv_sound_done(int index, void *ctx) {
 static void prv_snooze_done(int index, void *ctx) {
   Alarm a = prv_current();
   a.snooze = SNOOZE_OPTIONS[index];
+  prv_save(&a);
+}
+
+static void prv_smart_window_done(int index, void *ctx) {
+  Alarm a = prv_current();
+  a.smart_window_min = SMART_WINDOW_OPTIONS[index];
+  prv_save(&a);
+}
+
+static void prv_sensitivity_done(int index, void *ctx) {
+  Alarm a = prv_current();
+  a.smart_sensitivity = (uint8_t)index;
   prv_save(&a);
 }
 
@@ -263,6 +279,14 @@ static void prv_draw_row(GContext *ctx, const Layer *cell, MenuIndex *index, voi
       subtitle = a->challenge != CHALLENGE_OFF ? TR("Off (Challenge)", "Aus (Weckaufgabe)")
                                                : ui_snooze_name(a->snooze);
       break;
+    case ROW_SMART_WINDOW:
+      title = TR("Smart Alarm", "Intelligenter Wecker");
+      subtitle = ui_smart_window_name(a->smart_window_min);
+      break;
+    case ROW_SMART_SENSITIVITY:
+      title = TR("Sensitivity", "Empfindlichkeit");
+      subtitle = ui_sensitivity_name(a->smart_sensitivity);
+      break;
     case ROW_CHALLENGE:
       title = TR("Challenge", "Weckaufgabe");
       if (a->challenge == CHALLENGE_FOLLOW) {
@@ -282,9 +306,11 @@ static void prv_draw_row(GContext *ctx, const Layer *cell, MenuIndex *index, voi
       toggle = a->protect;
       break;
   }
-  // Protected alarm: show "Delete" greyed out
+  // Protected alarm: show "Delete" greyed out. Sensitivity has nothing to apply to
+  // while the smart window itself is off.
   bool greyed = (index->row == ROW_DELETE && a->protect) ||
-                (index->row == ROW_SNOOZE && a->challenge != CHALLENGE_OFF);
+                (index->row == ROW_SNOOZE && a->challenge != CHALLENGE_OFF) ||
+                (index->row == ROW_SMART_SENSITIVITY && a->smart_window_min == 0);
 
   bool show_symbol = index->row == ROW_SYMBOL && a->symbol;
   int text_w = b.size.w - 16 - (toggle >= 0 ? UI_TOGGLE_W + 10 : 0) - (show_symbol ? SYMBOL_LARGE + 6 : 0);
@@ -364,6 +390,29 @@ static void prv_select(MenuLayer *m, MenuIndex *index, void *c) {
       }
       option_picker_show(TR("Snooze Delay", "Schlummerdauer"), s_snooze_labels,
                          SNOOZE_OPTION_COUNT, selected, prv_snooze_done, NULL);
+      break;
+    }
+    case ROW_SMART_WINDOW: {
+      int selected = 0;
+      for (int i = 0; i < SMART_WINDOW_OPTION_COUNT; i++) {
+        s_smart_window_labels[i] = ui_smart_window_name(SMART_WINDOW_OPTIONS[i]);
+        if (SMART_WINDOW_OPTIONS[i] == a.smart_window_min) selected = i;
+      }
+      option_picker_show(TR("Smart Alarm", "Intelligenter Wecker"), s_smart_window_labels,
+                         SMART_WINDOW_OPTION_COUNT, selected, prv_smart_window_done, NULL);
+      break;
+    }
+    case ROW_SMART_SENSITIVITY: {
+      if (a.smart_window_min == 0) {
+        ui_show_message(TR("Turn on the smart alarm first.", "Zuerst den intelligenten Wecker einschalten."));
+        break;
+      }
+      for (int i = 0; i < SMART_SENS_COUNT; i++) {
+        s_sens_labels[i] = ui_sensitivity_name((SmartSensitivity)i);
+      }
+      int selected = a.smart_sensitivity < SMART_SENS_COUNT ? a.smart_sensitivity : DEFAULT_SMART_SENSITIVITY;
+      option_picker_show(TR("Sensitivity", "Empfindlichkeit"), s_sens_labels,
+                         SMART_SENS_COUNT, selected, prv_sensitivity_done, NULL);
       break;
     }
     case ROW_CHALLENGE:

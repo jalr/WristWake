@@ -36,6 +36,8 @@ const char *ui_vibe_name(int pattern);
 const char *ui_snooze_name(uint8_t minutes);
 const char *ui_volume_name(AlarmVolume volume);
 const char *ui_challenge_name(AlarmChallenge challenge);
+const char *ui_smart_window_name(uint8_t minutes);
+const char *ui_sensitivity_name(SmartSensitivity sensitivity);
 // Pause of the Follow challenge as text, e.g. "0.5 s" / "0,5 s"
 const char *ui_pause_name(int index);
 
